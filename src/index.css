@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --primary: #1C1A17;
+  --secondary: #25221E;
+  --accent: #C19A6B;
+  --neutral:	#5E452A;
+  --lightNeutral: #6E573F;
+  --refinedBeige: #A08C75;
+  --text: 	#EAE6E1;
+}
+
+body {
+  @apply bg-primary text-text min-h-screen;
+}
+
+.btn {
+  @apply px-4 py-2 rounded-lg font-medium transition-colors;
+}
+
+.btn-primary {
+  @apply bg-neutral text-text hover:bg-opacity-90;
+}
+
+.btn-secondary {
+  @apply bg-secondary hover:bg-opacity-90 text-text;
+}
+
+.btn-danger {
+  @apply bg-red-500 hover:bg-opacity-90 text-text;
+}
+
+.nav-link {
+  @apply flex flex-col items-center text-sm text-refinedBeige hover:text-accent;
+}
+
+.nav-link.active {
+  @apply text-accent;
+}
