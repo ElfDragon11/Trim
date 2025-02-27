@@ -11,6 +11,7 @@ interface Barber {
   image_url: string;
   latitude?: number;
   longitude?: number;
+  distance?: number; // Added distance property
 }
 
 interface Coordinates {
@@ -28,6 +29,9 @@ const defaultCenter = {
   lat: 39.8283, // Roughly center of US
   lng: -98.5795
 };
+
+// Default radius in miles
+const DEFAULT_RADIUS = 10;
 
 // Major cities coordinates for common locations
 const cityCoordinates: Record<string, Coordinates> = {
@@ -79,11 +83,13 @@ const cityCoordinates: Record<string, Coordinates> = {
 
 export default function MapView() {
   const [barbers, setBarbers] = useState<Barber[]>([]);
+  const [filteredBarbers, setFilteredBarbers] = useState<Barber[]>([]);
   const [selectedBarber, setSelectedBarber] = useState<Barber | null>(null);
   const [userLocation, setUserLocation] = useState(defaultCenter);
   const [mapCenter, setMapCenter] = useState(defaultCenter);
   const [isLoading, setIsLoading] = useState(true);
   const [mapZoom, setMapZoom] = useState(4); // Start with US view
+  const [radius, setRadius] = useState(DEFAULT_RADIUS);
 
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
@@ -98,6 +104,59 @@ export default function MapView() {
       setIsLoading(false);
     });
   }, []);
+
+  // Calculate distance between two coordinates using Haversine formula
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 3958.8; // Earth's radius in miles
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = 
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+      Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const distance = R * c;
+    return distance;
+  };
+
+  // Filter barbers based on distance from user
+  useEffect(() => {
+    if (barbers.length > 0 && userLocation.lat !== defaultCenter.lat) {
+      const barbersWithDistance = barbers.map(barber => {
+        if (barber.latitude && barber.longitude) {
+          const distance = calculateDistance(
+            userLocation.lat,
+            userLocation.lng,
+            barber.latitude,
+            barber.longitude
+          );
+          return { ...barber, distance };
+        }
+        return barber;
+      });
+
+      // Filter barbers within the radius
+      const nearby = barbersWithDistance
+        .filter(barber => barber.distance !== undefined && barber.distance <= radius)
+        .sort((a, b) => (a.distance || Infinity) - (b.distance || Infinity));
+      
+      setFilteredBarbers(nearby);
+      
+      // Adjust zoom based on results
+      if (nearby.length === 0) {
+        // If no nearby barbers, increase radius
+        setRadius(prev => Math.min(prev * 2, 50));
+      } else if (nearby.length > 10) {
+        // If too many results, zoom in more
+        setMapZoom(12);
+      } else {
+        setMapZoom(11);
+      }
+    } else {
+      // If we don't have user location yet, show all barbers
+      setFilteredBarbers(barbers);
+    }
+  }, [barbers, userLocation, radius]);
 
   const getUserLocation = () => {
     return new Promise<void>((resolve) => {
@@ -145,8 +204,8 @@ export default function MapView() {
           };
         });
 
-        console.log('Barbers with coordinates:', barbersWithCoordinates);
         setBarbers(barbersWithCoordinates);
+        setFilteredBarbers(barbersWithCoordinates); // Initially show all barbers
       }
     } catch (error) {
       console.error('Error fetching barbers:', error);
@@ -257,6 +316,10 @@ export default function MapView() {
     return defaultCenter;
   }
 
+  const handleRadiusChange = (newRadius: number) => {
+    setRadius(newRadius);
+  };
+
   if (!isLoaded || isLoading) {
     return (
       <div className="p-4 flex items-center justify-center h-[calc(100vh-120px)]">
@@ -268,6 +331,27 @@ export default function MapView() {
   return (
     <div className="p-4">
       <h1 className="text-2xl font-bold mb-4">Find Barbers Nearby</h1>
+      
+      <div className="mb-4 flex items-center">
+        <label htmlFor="radius" className="mr-2">Radius:</label>
+        <select 
+          id="radius" 
+          value={radius} 
+          onChange={(e) => handleRadiusChange(Number(e.target.value))}
+          className="bg-secondary text-text px-3 py-1 rounded-lg"
+        >
+          <option value="5">5 miles</option>
+          <option value="10">10 miles</option>
+          <option value="20">20 miles</option>
+          <option value="50">50 miles</option>
+        </select>
+        <span className="ml-4 text-sm text-gray-400">
+          {userLocation !== defaultCenter 
+            ? `${filteredBarbers.length} barbers found within ${radius} miles` 
+            : `${filteredBarbers.length} barbers total`}
+        </span>
+      </div>
+      
       <div className="w-full bg-secondary rounded-lg overflow-hidden">
         <GoogleMap
           mapContainerStyle={containerStyle}
@@ -293,20 +377,22 @@ export default function MapView() {
           }}
         >
           {/* User location marker */}
-          <Marker
-            position={userLocation}
-            icon={{
-              path: google.maps.SymbolPath.CIRCLE,
-              scale: 7,
-              fillColor: "#4285F4",
-              fillOpacity: 1,
-              strokeColor: "#ffffff",
-              strokeWeight: 2,
-            }}
-          />
+          {userLocation !== defaultCenter && (
+            <Marker
+              position={userLocation}
+              icon={{
+                path: google.maps.SymbolPath.CIRCLE,
+                scale: 7,
+                fillColor: "#4285F4",
+                fillOpacity: 1,
+                strokeColor: "#ffffff",
+                strokeWeight: 2,
+              }}
+            />
+          )}
 
           {/* Barber markers */}
-          {barbers.map((barber) => (
+          {filteredBarbers.map((barber) => (
             <Marker
               key={barber.id}
               position={{ lat: barber.latitude!, lng: barber.longitude! }}
@@ -340,6 +426,11 @@ export default function MapView() {
                 <h3 className="font-bold text-gray-800">{selectedBarber.name}</h3>
                 <p className="text-sm text-gray-600">{selectedBarber.location}</p>
                 <p className="text-sm text-gray-600">Rating: {selectedBarber.rating}</p>
+                {selectedBarber.distance !== undefined && (
+                  <p className="text-sm text-gray-600">
+                    {selectedBarber.distance.toFixed(1)} miles away
+                  </p>
+                )}
                 <Link 
                   to={`/barber/${selectedBarber.id}`}
                   className="mt-2 block text-sm text-blue-600 hover:text-blue-800"
@@ -351,6 +442,13 @@ export default function MapView() {
           )}
         </GoogleMap>
       </div>
+      
+      {userLocation !== defaultCenter && filteredBarbers.length === 0 && !isLoading && (
+        <div className="mt-4 p-4 bg-secondary rounded-lg text-center">
+          <p>No barbers found within {radius} miles.</p>
+          <p className="text-sm text-gray-400 mt-2">Try increasing the radius or check another location.</p>
+        </div>
+      )}
     </div>
   );
 }
