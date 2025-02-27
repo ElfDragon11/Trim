@@ -1,20 +1,24 @@
 import { useState } from 'react';
+import { useAuth } from '../lib/AuthContext';
 
 export default function UserProfile() {
   const [pushNotifications, setPushNotifications] = useState(true);
   const [darkMode, setDarkMode] = useState(true);
+  const { user, signOut } = useAuth();
+
+  const handleSignOut = async () => {
+    await signOut();
+  };
 
   return (
     <div className="max-w-2xl mx-auto p-4">
       <div className="flex items-center gap-4 mb-8">
-        <img
-          src="https://example.com/placeholder.jpg"
-          alt="Profile"
-          className="w-20 h-20 rounded-full"
-        />
+        <div className="w-20 h-20 rounded-full bg-neutral flex items-center justify-center text-2xl font-bold">
+          {user?.email?.charAt(0).toUpperCase() || 'U'}
+        </div>
         <div>
-          <h1 className="text-2xl font-bold">Alex Johnson</h1>
-          <p className="text-gray-400">alex.johnson@example.com</p>
+          <h1 className="text-2xl font-bold">My Profile</h1>
+          <p className="text-gray-400">{user?.email}</p>
         </div>
       </div>
 
@@ -58,7 +62,7 @@ export default function UserProfile() {
         <h2 className="text-xl font-bold mb-4">Account</h2>
         <button className="btn btn-primary w-full">Edit Profile</button>
         <button className="btn btn-secondary w-full">Change Password</button>
-        <button className="btn btn-danger w-full">Log Out</button>
+        <button className="btn btn-danger w-full" onClick={handleSignOut}>Log Out</button>
       </section>
     </div>
   );
