@@ -80,19 +80,22 @@ export default function BarberProfile() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user || !id) return;
 
-    const { data, error } = await supabase
-      .from('follows')
-      .select('id')
-      .eq('user_id', user.id)
-      .eq('barber_id', id)
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('follows')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('barber_id', id);
 
-    if (error && error.code !== 'PGRST116') {
-      console.error('Error checking follow status:', error);
-      return;
+      if (error) {
+        console.error('Error checking follow status:', error);
+        return;
+      }
+
+      setIsFollowing(data && data.length > 0);
+    } catch (error) {
+      console.error('Error in follow status check:', error);
     }
-
-    setIsFollowing(!!data);
   }
 
   async function handleFollow() {

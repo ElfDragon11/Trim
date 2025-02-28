@@ -11,7 +11,7 @@ interface Barber {
   image_url: string;
   latitude?: number;
   longitude?: number;
-  distance?: number; // Added distance property
+  distance?: number;
 }
 
 interface Coordinates {
@@ -26,14 +26,14 @@ const containerStyle = {
 
 // Default center (US center)
 const defaultCenter = {
-  lat: 39.8283, // Roughly center of US
+  lat: 39.8283,
   lng: -98.5795
 };
 
 // Default radius in miles
-const DEFAULT_RADIUS = 10;
+const DEFAULT_RADIUS = 50;
 
-// Major cities coordinates for common locations
+// City coordinates mapping
 const cityCoordinates: Record<string, Coordinates> = {
   // California
   'Los Angeles': { lat: 34.0522, lng: -118.2437 },
@@ -78,18 +78,27 @@ const cityCoordinates: Record<string, Coordinates> = {
   'Denver': { lat: 39.7392, lng: -104.9903 },
   
   // Arizona
-  'Phoenix': { lat: 33.4484, lng: -112.0740 }
+  'Phoenix': { lat: 33.4484, lng: -112.0740 },
+  
+  // Utah
+  'Provo': { lat: 40.2338, lng: -111.6585 },
+  'Orem': { lat: 40.2969, lng: -111.6946 },
+  'Lehi': { lat: 40.3916, lng: -111.8507 },
+  'American Fork': { lat: 40.3769, lng: -111.7953 },
+  'Pleasant Grove': { lat: 40.3641, lng: -111.7385 },
+  'Springville': { lat: 40.1652, lng: -111.6107 }
 };
 
 export default function MapView() {
   const [barbers, setBarbers] = useState<Barber[]>([]);
-  const [filteredBarbers, setFilteredBarbers] = useState<Barber[]>([]);
   const [selectedBarber, setSelectedBarber] = useState<Barber | null>(null);
   const [userLocation, setUserLocation] = useState(defaultCenter);
   const [mapCenter, setMapCenter] = useState(defaultCenter);
   const [isLoading, setIsLoading] = useState(true);
-  const [mapZoom, setMapZoom] = useState(4); // Start with US view
+  const [mapZoom, setMapZoom] = useState(4);
+  const [showAllBarbers, setShowAllBarbers] = useState(true);
   const [radius, setRadius] = useState(DEFAULT_RADIUS);
+  const [nearbyBarbers, setNearbyBarbers] = useState<Barber[]>([]);
 
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
@@ -119,7 +128,7 @@ export default function MapView() {
     return distance;
   };
 
-  // Filter barbers based on distance from user
+  // Update nearby barbers when user location, barbers, or radius changes
   useEffect(() => {
     if (barbers.length > 0 && userLocation.lat !== defaultCenter.lat) {
       const barbersWithDistance = barbers.map(barber => {
@@ -140,21 +149,7 @@ export default function MapView() {
         .filter(barber => barber.distance !== undefined && barber.distance <= radius)
         .sort((a, b) => (a.distance || Infinity) - (b.distance || Infinity));
       
-      setFilteredBarbers(nearby);
-      
-      // Adjust zoom based on results
-      if (nearby.length === 0) {
-        // If no nearby barbers, increase radius
-        setRadius(prev => Math.min(prev * 2, 50));
-      } else if (nearby.length > 10) {
-        // If too many results, zoom in more
-        setMapZoom(12);
-      } else {
-        setMapZoom(11);
-      }
-    } else {
-      // If we don't have user location yet, show all barbers
-      setFilteredBarbers(barbers);
+      setNearbyBarbers(nearby);
     }
   }, [barbers, userLocation, radius]);
 
@@ -169,7 +164,7 @@ export default function MapView() {
             };
             setUserLocation(userCoords);
             setMapCenter(userCoords);
-            setMapZoom(11); // Zoom in when we have user location
+            setMapZoom(8); // Zoom in when we have user location
             resolve();
           },
           () => {
@@ -182,6 +177,45 @@ export default function MapView() {
       }
     });
   };
+
+  function getCoordinatesForLocation(location: string): Coordinates | null {
+    // First check if we have an exact match in our city coordinates
+    if (cityCoordinates[location]) {
+      return cityCoordinates[location];
+    }
+    
+    // Check if the location contains a known city name
+    for (const [cityName, coords] of Object.entries(cityCoordinates)) {
+      if (location.includes(cityName)) {
+        return coords;
+      }
+    }
+    
+    // Check for state abbreviations (e.g., "NY", "CA")
+    const stateCoordinates: Record<string, Coordinates> = {
+      'CA': { lat: 36.7783, lng: -119.4179 }, // California
+      'NY': { lat: 40.7128, lng: -74.0060 }, // New York
+      'TX': { lat: 31.9686, lng: -99.9018 }, // Texas
+      'FL': { lat: 27.6648, lng: -81.5158 }, // Florida
+      'IL': { lat: 41.8781, lng: -87.6298 }, // Illinois
+      'WA': { lat: 47.6062, lng: -122.3321 }, // Washington
+      'GA': { lat: 33.7490, lng: -84.3880 }, // Georgia
+      'MA': { lat: 42.3601, lng: -71.0589 }, // Massachusetts
+      'NV': { lat: 36.1699, lng: -115.1398 }, // Nevada
+      'CO': { lat: 39.7392, lng: -104.9903 }, // Colorado
+      'AZ': { lat: 33.4484, lng: -112.0740 }, // Arizona
+      'UT': { lat: 40.7608, lng: -111.8910 }  // Utah
+    };
+    
+    const words = location.split(/[\s,]+/);
+    for (const word of words) {
+      if (stateCoordinates[word]) {
+        return stateCoordinates[word];
+      }
+    }
+    
+    return null;
+  }
 
   async function fetchBarbers() {
     try {
@@ -199,125 +233,39 @@ export default function MapView() {
           const coordinates = getCoordinatesForLocation(barber.location);
           return {
             ...barber,
-            latitude: coordinates.lat,
-            longitude: coordinates.lng
+            latitude: coordinates?.lat || null,
+            longitude: coordinates?.lng || null
           };
         });
 
-        setBarbers(barbersWithCoordinates);
-        setFilteredBarbers(barbersWithCoordinates); // Initially show all barbers
+        // Filter out barbers without coordinates
+        const validBarbers = barbersWithCoordinates.filter(
+          barber => barber.latitude !== null && barber.longitude !== null
+        );
+
+        setBarbers(validBarbers);
       }
     } catch (error) {
       console.error('Error fetching barbers:', error);
     }
   }
 
-  function getCoordinatesForLocation(location: string): Coordinates {
-    // First check if we have an exact match in our city coordinates
-    if (cityCoordinates[location]) {
-      return cityCoordinates[location];
-    }
-    
-    // Check if the location contains a known city name
-    for (const [cityName, coords] of Object.entries(cityCoordinates)) {
-      if (location.includes(cityName)) {
-        return coords;
-      }
-    }
-    
-    // Try to parse state names
-    const states: Record<string, Coordinates> = {
-      'California': { lat: 36.7783, lng: -119.4179 },
-      'New York': { lat: 43.2994, lng: -74.2179 },
-      'Texas': { lat: 31.9686, lng: -99.9018 },
-      'Florida': { lat: 27.6648, lng: -81.5158 },
-      'Illinois': { lat: 40.6331, lng: -89.3985 },
-      'Pennsylvania': { lat: 41.2033, lng: -77.1945 },
-      'Ohio': { lat: 40.4173, lng: -82.9071 },
-      'Georgia': { lat: 33.0406, lng: -83.6431 },
-      'Michigan': { lat: 44.3148, lng: -85.6024 },
-      'North Carolina': { lat: 35.7596, lng: -79.0193 },
-      'New Jersey': { lat: 40.0583, lng: -74.4057 },
-      'Virginia': { lat: 37.7693, lng: -78.1700 },
-      'Washington': { lat: 47.7511, lng: -120.7401 },
-      'Arizona': { lat: 34.0489, lng: -111.0937 },
-      'Massachusetts': { lat: 42.4072, lng: -71.3824 },
-      'Tennessee': { lat: 35.5175, lng: -86.5804 },
-      'Indiana': { lat: 40.2672, lng: -86.1349 },
-      'Missouri': { lat: 37.9643, lng: -91.8318 },
-      'Maryland': { lat: 39.0458, lng: -76.6413 },
-      'Colorado': { lat: 39.0598, lng: -105.3111 },
-      'Wisconsin': { lat: 43.7844, lng: -88.7879 },
-      'Minnesota': { lat: 46.7296, lng: -94.6859 },
-      'South Carolina': { lat: 33.8361, lng: -81.1637 },
-      'Alabama': { lat: 32.3182, lng: -86.9023 },
-      'Louisiana': { lat: 31.1695, lng: -91.8678 },
-      'Kentucky': { lat: 37.8393, lng: -84.2700 },
-      'Oregon': { lat: 43.8041, lng: -120.5542 },
-      'Oklahoma': { lat: 35.0078, lng: -97.0929 },
-      'Connecticut': { lat: 41.6032, lng: -73.0877 },
-      'Utah': { lat: 39.3210, lng: -111.0937 },
-      'Iowa': { lat: 42.0115, lng: -93.2105 },
-      'Nevada': { lat: 38.8026, lng: -116.4194 },
-      'Arkansas': { lat: 34.9697, lng: -92.3731 },
-      'Mississippi': { lat: 32.3547, lng: -89.3985 },
-      'Kansas': { lat: 39.0119, lng: -98.4842 },
-      'New Mexico': { lat: 34.5199, lng: -105.8701 },
-      'Nebraska': { lat: 41.4925, lng: -99.9018 },
-      'Idaho': { lat: 44.0682, lng: -114.7420 },
-      'Hawaii': { lat: 19.8968, lng: -155.5828 },
-      'New Hampshire': { lat: 43.1939, lng: -71.5724 },
-      'Maine': { lat: 44.6939, lng: -69.3819 },
-      'Montana': { lat: 46.8797, lng: -110.3626 },
-      'Rhode Island': { lat: 41.5801, lng: -71.4774 },
-      'Delaware': { lat: 38.9108, lng: -75.5277 },
-      'South Dakota': { lat: 43.9695, lng: -99.9018 },
-      'North Dakota': { lat: 47.5515, lng: -101.0020 },
-      'Alaska': { lat: 64.2008, lng: -149.4937 },
-      'Vermont': { lat: 44.5588, lng: -72.5778 },
-      'Wyoming': { lat: 43.0759, lng: -107.2903 }
-    };
-    
-    // Check for state names in the location
-    for (const [stateName, coords] of Object.entries(states)) {
-      if (location.includes(stateName)) {
-        return coords;
-      }
-    }
-    
-    // Check for state abbreviations
-    const stateAbbreviations: Record<string, string> = {
-      'AL': 'Alabama', 'AK': 'Alaska', 'AZ': 'Arizona', 'AR': 'Arkansas',
-      'CA': 'California', 'CO': 'Colorado', 'CT': 'Connecticut', 'DE': 'Delaware',
-      'FL': 'Florida', 'GA': 'Georgia', 'HI': 'Hawaii', 'ID': 'Idaho',
-      'IL': 'Illinois', 'IN': 'Indiana', 'IA': 'Iowa', 'KS': 'Kansas',
-      'KY': 'Kentucky', 'LA': 'Louisiana', 'ME': 'Maine', 'MD': 'Maryland',
-      'MA': 'Massachusetts', 'MI': 'Michigan', 'MN': 'Minnesota', 'MS': 'Mississippi',
-      'MO': 'Missouri', 'MT': 'Montana', 'NE': 'Nebraska', 'NV': 'Nevada',
-      'NH': 'New Hampshire', 'NJ': 'New Jersey', 'NM': 'New Mexico', 'NY': 'New York',
-      'NC': 'North Carolina', 'ND': 'North Dakota', 'OH': 'Ohio', 'OK': 'Oklahoma',
-      'OR': 'Oregon', 'PA': 'Pennsylvania', 'RI': 'Rhode Island', 'SC': 'South Carolina',
-      'SD': 'South Dakota', 'TN': 'Tennessee', 'TX': 'Texas', 'UT': 'Utah',
-      'VT': 'Vermont', 'VA': 'Virginia', 'WA': 'Washington', 'WV': 'West Virginia',
-      'WI': 'Wisconsin', 'WY': 'Wyoming'
-    };
-    
-    // Check for state abbreviations (e.g., "NY", "CA")
-    const words = location.split(/[\s,]+/);
-    for (const word of words) {
-      const abbr = word.toUpperCase();
-      if (stateAbbreviations[abbr]) {
-        return states[stateAbbreviations[abbr]];
-      }
-    }
-    
-    // If all else fails, return default center
-    console.warn(`Could not find coordinates for location: ${location}`);
-    return defaultCenter;
-  }
-
   const handleRadiusChange = (newRadius: number) => {
     setRadius(newRadius);
+  };
+
+  const toggleBarberDisplay = () => {
+    setShowAllBarbers(!showAllBarbers);
+    
+    // If switching to nearby only, adjust the map center and zoom
+    if (showAllBarbers && userLocation !== defaultCenter) {
+      setMapCenter(userLocation);
+      setMapZoom(9);
+    } else {
+      // If showing all, zoom out to see more of the map
+      setMapZoom(4);
+      setMapCenter(defaultCenter);
+    }
   };
 
   if (!isLoaded || isLoading) {
@@ -328,27 +276,42 @@ export default function MapView() {
     );
   }
 
+  // Determine which barbers to display
+  const displayBarbers = showAllBarbers ? barbers : nearbyBarbers;
+
   return (
     <div className="p-4">
-      <h1 className="text-2xl font-bold mb-4">Find Barbers Nearby</h1>
+      <h1 className="text-2xl font-bold mb-4">Find Barbers</h1>
       
-      <div className="mb-4 flex items-center">
-        <label htmlFor="radius" className="mr-2">Radius:</label>
-        <select 
-          id="radius" 
-          value={radius} 
-          onChange={(e) => handleRadiusChange(Number(e.target.value))}
-          className="bg-secondary text-text px-3 py-1 rounded-lg"
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <button 
+          onClick={toggleBarberDisplay}
+          className="bg-neutral text-text px-3 py-1 rounded-lg"
         >
-          <option value="5">5 miles</option>
-          <option value="10">10 miles</option>
-          <option value="20">20 miles</option>
-          <option value="50">50 miles</option>
-        </select>
-        <span className="ml-4 text-sm text-gray-400">
-          {userLocation !== defaultCenter 
-            ? `${filteredBarbers.length} barbers found within ${radius} miles` 
-            : `${filteredBarbers.length} barbers total`}
+          {showAllBarbers ? 'Show Nearby Only' : 'Show All Barbers'}
+        </button>
+        
+        {!showAllBarbers && (
+          <>
+            <label htmlFor="radius" className="ml-2 mr-2">Radius:</label>
+            <select 
+              id="radius" 
+              value={radius} 
+              onChange={(e) => handleRadiusChange(Number(e.target.value))}
+              className="bg-secondary text-text px-3 py-1 rounded-lg"
+            >
+              <option value="10">10 miles</option>
+              <option value="25">25 miles</option>
+              <option value="50">50 miles</option>
+              <option value="100">100 miles</option>
+            </select>
+          </>
+        )}
+        
+        <span className="ml-auto text-sm text-gray-400">
+          {showAllBarbers 
+            ? `Showing all ${barbers.length} barbers` 
+            : `${nearbyBarbers.length} barbers within ${radius} miles`}
         </span>
       </div>
       
@@ -392,7 +355,7 @@ export default function MapView() {
           )}
 
           {/* Barber markers */}
-          {filteredBarbers.map((barber) => (
+          {displayBarbers.map((barber) => (
             <Marker
               key={barber.id}
               position={{ lat: barber.latitude!, lng: barber.longitude! }}
@@ -443,7 +406,7 @@ export default function MapView() {
         </GoogleMap>
       </div>
       
-      {userLocation !== defaultCenter && filteredBarbers.length === 0 && !isLoading && (
+      {!showAllBarbers && nearbyBarbers.length === 0 && userLocation !== defaultCenter && (
         <div className="mt-4 p-4 bg-secondary rounded-lg text-center">
           <p>No barbers found within {radius} miles.</p>
           <p className="text-sm text-gray-400 mt-2">Try increasing the radius or check another location.</p>
